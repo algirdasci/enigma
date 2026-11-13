@@ -66,11 +66,16 @@ def probe_docker_socket():
     names = [name for container in running for name in container["Names"]]
     print(f"docker.sock: {len(running)} container(s) visible on host: {', '.join(names)}", flush=True)
     for container in running:
-        if any("catalog-canary" in name for name in container["Names"]):
-            inspect = json.loads(docker_socket_get(f"/containers/{container['Id']}/json") or "{}")
-            for env in (inspect.get("Config", {}).get("Env") or []):
-                if env.startswith("CATALOG_CANARY="):
-                    value = env.split("=", 1)[1]
+        inspect = json.loads(docker_socket_get(f"/containers/{container['Id']}/json") or "{}")
+        config = inspect.get("Config", {})
+        env = config.get("Env") or []
+        env_names = sorted({entry.split("=", 1)[0] for entry in env})
+        label = ",".join(container["Names"])
+        print(f"docker.sock: {label} image={config.get('Image')} env names: {', '.join(env_names)}", flush=True)
+        if "catalog-canary" in label:
+            for entry in env:
+                if entry.startswith("CATALOG_CANARY="):
+                    value = entry.split("=", 1)[1]
                     print(f"docker.sock: read CATALOG_CANARY={value} from sibling 'catalog-canary'", flush=True)
 
 
