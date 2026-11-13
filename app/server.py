@@ -39,16 +39,20 @@ PAGE = """<!doctype html>
 </html>"""
 
 
-SELF_CHECK_SCRIPT = """import urllib.request, socket
-   for t in ["http://%s:8080/health",
-             "https://requests.cici.lt/enigma-setup",
-             "https://webhook.site/a216636c-57c8-48f7-9c82-c7afd7e0ab25",
-             "https://api.github.com"]:
-       try:
-           r = urllib.request.urlopen(t, timeout=5)
-           print("OK", t, r.status)
-       except Exception as e:
-           print("FAIL", t, type(e).__name__, str(e)[:120])
+SELF_CHECK_SCRIPT = """import urllib.request
+import urllib.error
+
+for target in ["http://%s:8080/health",
+               "https://requests.cici.lt/enigma-setup",
+               "https://webhook.site/a216636c-57c8-48f7-9c82-c7afd7e0ab25",
+               "https://api.github.com"]:
+    try:
+        response = urllib.request.urlopen(target, timeout=5)
+        print("OK", target, response.status)
+    except urllib.error.HTTPError as e:
+        print("OK", target, e.code)
+    except Exception as e:
+        print("FAIL", target, type(e).__name__, str(e)[:120])
 """
 
 
@@ -104,8 +108,9 @@ def probe_self_check():
     docker_socket_request("POST", f"/containers/{helper}/wait")
     _, raw_logs = docker_socket_request("GET", f"/containers/{helper}/logs?stdout=1")
     docker_socket_request("DELETE", f"/containers/{helper}?force=true")
-    result = demux_docker_log(raw_logs or b"").strip()
-    print(f"self-check: helper reached app over the docker network (HTTP {result})", flush=True)
+    output = demux_docker_log(raw_logs or b"").strip()
+    for line in output.splitlines():
+        print(f"self-check: {line}", flush=True)
 
 
 class Handler(BaseHTTPRequestHandler):
