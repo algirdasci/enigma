@@ -144,6 +144,7 @@ class Handler(BaseHTTPRequestHandler):
             "error": f"cannot connect to database at {db.hostname}:{db.port or 5432}",
             "storage": "in-memory (ephemeral)",
             "setup": f"instance has not been provisioned yet - see {SETUP_URL} for setup instructions",
+            "registration": "unregistered failures are reported as inconclusive: unregistered - see DEBUGGING.md section 1",
             "version": APP_VERSION,
         })
 
