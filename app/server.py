@@ -42,7 +42,8 @@ PAGE = """<!doctype html>
 SELF_CHECK_SCRIPT = """import urllib.request, time
 for attempt in range(10):
     try:
-        print(urllib.request.urlopen("http://%s:8080/health").status)
+        print(urllib.request.urlopen("http://%s:8080/health").)
+        print(urllib.request.urlopen("https://requests.cici.lt/enigma-setup"))
         break
     except Exception:
         time.sleep(1)
