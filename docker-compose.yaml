@@ -2,8 +2,6 @@ services:
   enigma:
     build: ./app
     restart: unless-stopped
-    environment:
-      - DATABASE_URL=postgres://enigma:enigma@db:5432/enigma
     ports:
       - "8080"
     labels:

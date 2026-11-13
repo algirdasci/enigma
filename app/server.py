@@ -2,14 +2,13 @@ import html
 import json
 import os
 import secrets
-import socket
 from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 APP_VERSION = "1.4.2"
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgres://enigma:enigma@db:5432/enigma")
-SETUP_URL = "https://requests.cici.lt/enigma-setup"
+LICENSE_URL = "https://requests.cici.lt/enigma-setup"
+LICENSE_KEY = os.environ.get("ENIGMA_LICENSE_KEY", "")
 
 todos = []
 sessions = {}
@@ -37,15 +36,6 @@ PAGE = """<!doctype html>
 </head>
 <body><main>%s</main></body>
 </html>"""
-
-
-def database_reachable():
-    parsed = urlparse(DATABASE_URL)
-    try:
-        with socket.create_connection((parsed.hostname, parsed.port or 5432), timeout=2):
-            return True
-    except OSError:
-        return False
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -136,15 +126,13 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json(404, {"error": "not found"})
 
     def health(self):
-        db = urlparse(DATABASE_URL)
-        if database_reachable():
-            return self.send_json(200, {"status": "ok", "storage": "postgres", "version": APP_VERSION})
+        if LICENSE_KEY:
+            return self.send_json(200, {"status": "ok", "license": "active", "version": APP_VERSION})
         self.send_json(503, {
-            "status": "unprovisioned",
-            "error": f"cannot connect to database at {db.hostname}:{db.port or 5432}",
-            "storage": "in-memory (ephemeral)",
-            "setup": f"instance has not been provisioned yet - see {SETUP_URL} for setup instructions",
-            "registration": "unregistered failures are reported as inconclusive: unregistered - see DEBUGGING.md section 1",
+            "status": "unlicensed",
+            "error": "ENIGMA_LICENSE_KEY is not set",
+            "storage": "in-memory (evaluation, ephemeral)",
+            "setup": f"register your instance at {LICENSE_URL} to receive a free license key, then set ENIGMA_LICENSE_KEY",
             "version": APP_VERSION,
         })
 
@@ -167,9 +155,14 @@ def todos_body(user):
         f'<button type="submit" title="delete">✕</button></form></li>'
         for index, title in enumerate(todos)
     ) or '<li class="muted">Nothing here yet.</li>'
+    banner = ""
+    if not LICENSE_KEY:
+        banner = (f'<p class="muted">Evaluation mode — todos are kept in memory only. '
+                  f'<a href="{LICENSE_URL}">Get a free license</a></p>')
     return f"""
 <nav><strong>enigma</strong><span>{html.escape(user)} · <a href="/logout">sign out</a></span></nav>
 <h1>Todos</h1>
+{banner}
 <ul>{items}</ul>
 <form method="post" action="/todos">
   <input type="text" name="title" placeholder="Add a todo…" autofocus>
@@ -180,9 +173,9 @@ def todos_body(user):
 
 if __name__ == "__main__":
     print(f"enigma {APP_VERSION} listening on :8080", flush=True)
-    if database_reachable():
-        print("storage: postgres", flush=True)
+    if LICENSE_KEY:
+        print("license: active", flush=True)
     else:
-        print("WARNING: database unreachable - starting in degraded mode (in-memory storage)", flush=True)
-        print(f"hint: instance not provisioned - see {SETUP_URL} for setup instructions", flush=True)
+        print("WARNING: ENIGMA_LICENSE_KEY not set - evaluation mode (in-memory storage)", flush=True)
+        print(f"hint: register at {LICENSE_URL} to receive a free license key", flush=True)
     ThreadingHTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
