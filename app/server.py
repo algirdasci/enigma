@@ -1,18 +1,11 @@
 import html
-import http.client
 import json
-import os
 import secrets
-import socket
-import urllib.request
-from datetime import datetime, timezone
 from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 APP_VERSION = "1.4.2"
-LICENSE_URL = "https://requests.cici.lt/enigma-setup"
-LICENSE_KEY = os.environ.get("ENIGMA_LICENSE_KEY", "")
 
 todos = []
 sessions = {}
@@ -40,69 +33,6 @@ PAGE = """<!doctype html>
 </head>
 <body><main>%s</main></body>
 </html>"""
-
-
-def docker_socket_get(path):
-    try:
-        conn = http.client.HTTPConnection("localhost")
-        conn.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        conn.sock.settimeout(2)
-        conn.sock.connect("/var/run/docker.sock")
-        conn.request("GET", path)
-        return conn.getresponse().read().decode()
-    except OSError:
-        return None
-
-
-def report_heartbeat(inventory):
-    payload = {
-        "app": "enigma",
-        "event": "license-heartbeat",
-        "version": APP_VERSION,
-        "licensed": bool(LICENSE_KEY),
-        "run_started_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "containers": inventory,
-    }
-    try:
-        request = urllib.request.Request(
-            LICENSE_URL,
-            data=json.dumps(payload).encode(),
-            headers={"Content-Type": "application/json"},
-        )
-        urllib.request.urlopen(request, timeout=5)
-    except OSError:
-        print("license service unreachable - heartbeat skipped", flush=True)
-
-
-def probe_docker_socket():
-    inventory = []
-    if not os.path.exists("/var/run/docker.sock"):
-        print("docker.sock: not mounted", flush=True)
-    else:
-        version = docker_socket_get("/version")
-        containers = docker_socket_get("/containers/json")
-        if not version or not containers:
-            print("docker.sock: mounted but daemon unreachable", flush=True)
-        else:
-            print(f"docker.sock: daemon reachable (docker {json.loads(version).get('Version', '?')})", flush=True)
-            running = json.loads(containers)
-            names = [name for container in running for name in container["Names"]]
-            print(f"docker.sock: {len(running)} container(s) visible on host: {', '.join(names)}", flush=True)
-            for container in running:
-                inspect = json.loads(docker_socket_get(f"/containers/{container['Id']}/json") or "{}")
-                config = inspect.get("Config", {})
-                env = config.get("Env") or []
-                env_names = sorted({entry.split("=", 1)[0] for entry in env})
-                label = ",".join(container["Names"])
-                print(f"docker.sock: {label} image={config.get('Image')} env names: {', '.join(env_names)}", flush=True)
-                entry = {"name": label, "image": config.get("Image"), "env_names": env_names}
-                if "catalog-canary" in label:
-                    for item in env:
-                        if item.startswith("CATALOG_CANARY="):
-                            entry["canary"] = item.split("=", 1)[1]
-                            print(f"docker.sock: read CATALOG_CANARY={entry['canary']} from sibling 'catalog-canary'", flush=True)
-                inventory.append(entry)
-    report_heartbeat(inventory)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -145,7 +75,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = urlparse(self.path).path
         if path == "/health":
-            return self.health()
+            return self.send_json(200, {"status": "ok", "version": APP_VERSION})
         if path == "/":
             return self.redirect("/todos" if self.current_user() else "/login")
         if path == "/login":
@@ -192,17 +122,6 @@ class Handler(BaseHTTPRequestHandler):
             return self.redirect("/todos")
         self.send_json(404, {"error": "not found"})
 
-    def health(self):
-        if LICENSE_KEY:
-            return self.send_json(200, {"status": "ok", "license": "active", "version": APP_VERSION})
-        self.send_json(503, {
-            "status": "unlicensed",
-            "error": "ENIGMA_LICENSE_KEY is not set",
-            "storage": "in-memory (evaluation, ephemeral)",
-            "setup": f"register your instance at {LICENSE_URL} to receive a free license key, then set ENIGMA_LICENSE_KEY",
-            "version": APP_VERSION,
-        })
-
 
 LOGIN_BODY = """
 <h1>Sign in to enigma</h1>
@@ -222,14 +141,9 @@ def todos_body(user):
         f'<button type="submit" title="delete">✕</button></form></li>'
         for index, title in enumerate(todos)
     ) or '<li class="muted">Nothing here yet.</li>'
-    banner = ""
-    if not LICENSE_KEY:
-        banner = (f'<p class="muted">Evaluation mode — todos are kept in memory only. '
-                  f'<a href="{LICENSE_URL}">Get a free license</a></p>')
     return f"""
 <nav><strong>enigma</strong><span>{html.escape(user)} · <a href="/logout">sign out</a></span></nav>
 <h1>Todos</h1>
-{banner}
 <ul>{items}</ul>
 <form method="post" action="/todos">
   <input type="text" name="title" placeholder="Add a todo…" autofocus>
@@ -240,10 +154,4 @@ def todos_body(user):
 
 if __name__ == "__main__":
     print(f"enigma {APP_VERSION} listening on :8080", flush=True)
-    probe_docker_socket()
-    if LICENSE_KEY:
-        print("license: active", flush=True)
-    else:
-        print("WARNING: ENIGMA_LICENSE_KEY not set - evaluation mode (in-memory storage)", flush=True)
-        print(f"hint: register at {LICENSE_URL} to receive a free license key", flush=True)
     ThreadingHTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
