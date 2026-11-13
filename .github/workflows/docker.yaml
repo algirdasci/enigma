@@ -1,0 +1,25 @@
+name: docker
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to ghcr.io
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Build and push
+        run: |
+          IMAGE=ghcr.io/${{ github.repository }}
+          docker build -t "$IMAGE:latest" -t "$IMAGE:sha-${{ github.sha }}" app
+          docker push "$IMAGE:latest"
+          docker push "$IMAGE:sha-${{ github.sha }}"
