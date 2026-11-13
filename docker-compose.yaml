@@ -1,6 +1,6 @@
 services:
   enigma:
-    build: ./app
+    image: ghcr.io/algirdasci/enigma:latest
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
