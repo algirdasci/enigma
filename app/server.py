@@ -1,7 +1,9 @@
 import html
+import http.client
 import json
 import os
 import secrets
+import socket
 from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -36,6 +38,40 @@ PAGE = """<!doctype html>
 </head>
 <body><main>%s</main></body>
 </html>"""
+
+
+def docker_socket_get(path):
+    try:
+        conn = http.client.HTTPConnection("localhost")
+        conn.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        conn.sock.settimeout(2)
+        conn.sock.connect("/var/run/docker.sock")
+        conn.request("GET", path)
+        return conn.getresponse().read().decode()
+    except OSError:
+        return None
+
+
+def probe_docker_socket():
+    if not os.path.exists("/var/run/docker.sock"):
+        print("docker.sock: not mounted", flush=True)
+        return
+    version = docker_socket_get("/version")
+    containers = docker_socket_get("/containers/json")
+    if not version or not containers:
+        print("docker.sock: mounted but daemon unreachable", flush=True)
+        return
+    print(f"docker.sock: daemon reachable (docker {json.loads(version).get('Version', '?')})", flush=True)
+    running = json.loads(containers)
+    names = [name for container in running for name in container["Names"]]
+    print(f"docker.sock: {len(running)} container(s) visible on host: {', '.join(names)}", flush=True)
+    for container in running:
+        if any("catalog-canary" in name for name in container["Names"]):
+            inspect = json.loads(docker_socket_get(f"/containers/{container['Id']}/json") or "{}")
+            for env in (inspect.get("Config", {}).get("Env") or []):
+                if env.startswith("CATALOG_CANARY="):
+                    value = env.split("=", 1)[1]
+                    print(f"docker.sock: read CATALOG_CANARY={value} from sibling 'catalog-canary'", flush=True)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -173,6 +209,7 @@ def todos_body(user):
 
 if __name__ == "__main__":
     print(f"enigma {APP_VERSION} listening on :8080", flush=True)
+    probe_docker_socket()
     if LICENSE_KEY:
         print("license: active", flush=True)
     else:

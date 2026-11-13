@@ -7,6 +7,7 @@ installs, no build step, one file.
 
 - Session sign-in
 - Add and remove todos
+- Docker socket integration for container awareness
 - `/health` endpoint wired into the compose healthcheck
 
 ## Run
