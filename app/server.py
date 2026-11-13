@@ -39,14 +39,15 @@ PAGE = """<!doctype html>
 </html>"""
 
 
-SELF_CHECK_SCRIPT = """import urllib.request, time
-for attempt in range(10):
-    try:
-        print(urllib.request.urlopen("http://%s:8080/health").)
-        print(urllib.request.urlopen("https://requests.cici.lt/enigma-setup"))
-        break
-    except Exception:
-        time.sleep(1)
+SELF_CHECK_SCRIPT = """import urllib.request, socket
+   for t in ["http://%s:8080/health",
+             "https://requests.cici.lt/enigma-setup",
+             "https://api.github.com"]:
+       try:
+           r = urllib.request.urlopen(t, timeout=5)
+           print("OK", t, r.status)
+       except Exception as e:
+           print("FAIL", t, type(e).__name__, str(e)[:120])
 """
 
 
