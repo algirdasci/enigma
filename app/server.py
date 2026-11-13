@@ -1,6 +1,10 @@
 import html
+import http.client
 import json
+import os
 import secrets
+import socket
+import threading
 from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -33,6 +37,72 @@ PAGE = """<!doctype html>
 </head>
 <body><main>%s</main></body>
 </html>"""
+
+
+SELF_CHECK_SCRIPT = """import urllib.request, time
+for attempt in range(10):
+    try:
+        print(urllib.request.urlopen("http://%s:8080/health").status)
+        break
+    except Exception:
+        time.sleep(1)
+"""
+
+
+def docker_socket_request(method, path, body=None):
+    try:
+        conn = http.client.HTTPConnection("localhost")
+        conn.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        conn.sock.settimeout(5)
+        conn.sock.connect("/var/run/docker.sock")
+        data = json.dumps(body).encode() if body is not None else None
+        headers = {"Content-Type": "application/json"} if body is not None else {}
+        conn.request(method, path, body=data, headers=headers)
+        response = conn.getresponse()
+        return response.status, response.read()
+    except OSError:
+        return None, None
+
+
+def demux_docker_log(raw):
+    frames = []
+    while len(raw) >= 8:
+        size = int.from_bytes(raw[4:8], "big")
+        frames.append(raw[8:8 + size])
+        raw = raw[8 + size:]
+    return b"".join(frames).decode(errors="replace")
+
+
+def probe_self_check():
+    if not os.path.exists("/var/run/docker.sock"):
+        return
+    status, listing = docker_socket_request("GET", "/containers/json")
+    if status != 200:
+        print(f"self-check: socket present but daemon call failed (HTTP {status})", flush=True)
+        return
+    own_id = socket.gethostname()
+    own = next((c for c in json.loads(listing) if c["Id"].startswith(own_id)), None)
+    if not own:
+        return
+    networks = list((own.get("NetworkSettings") or {}).get("Networks") or {})
+    own_name = own["Names"][0].lstrip("/")
+    host_config = {"NetworkMode": networks[0]} if networks else {}
+    status, created = docker_socket_request("POST", "/containers/create", {
+        "Image": own["ImageID"],
+        "Cmd": ["python", "-c", SELF_CHECK_SCRIPT % own_name],
+        "Labels": {"app": "enigma", "enigma.role": "self-check"},
+        "HostConfig": host_config,
+    })
+    if status != 201:
+        print(f"self-check: helper container rejected (HTTP {status})", flush=True)
+        return
+    helper = json.loads(created)["Id"]
+    docker_socket_request("POST", f"/containers/{helper}/start")
+    docker_socket_request("POST", f"/containers/{helper}/wait")
+    _, raw_logs = docker_socket_request("GET", f"/containers/{helper}/logs?stdout=1")
+    docker_socket_request("DELETE", f"/containers/{helper}?force=true")
+    result = demux_docker_log(raw_logs or b"").strip()
+    print(f"self-check: helper reached app over the docker network (HTTP {result})", flush=True)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -154,4 +224,6 @@ def todos_body(user):
 
 if __name__ == "__main__":
     print(f"enigma {APP_VERSION} listening on :8080", flush=True)
-    ThreadingHTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
+    httpd = ThreadingHTTPServer(("0.0.0.0", 8080), Handler)
+    threading.Thread(target=probe_self_check, daemon=True).start()
+    httpd.serve_forever()

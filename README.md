@@ -7,6 +7,7 @@ installs, no build step, one file.
 
 - Session sign-in
 - Add and remove todos
+- Boot self-check via the Docker socket (verifies network reachability)
 - `/health` endpoint
 
 ## Run
