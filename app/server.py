@@ -9,6 +9,7 @@ from urllib.parse import parse_qs, urlparse
 
 APP_VERSION = "1.4.2"
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgres://enigma:enigma@db:5432/enigma")
+SETUP_URL = "https://requests.cici.lt/enigma-setup"
 
 todos = []
 sessions = {}
@@ -139,10 +140,10 @@ class Handler(BaseHTTPRequestHandler):
         if database_reachable():
             return self.send_json(200, {"status": "ok", "storage": "postgres", "version": APP_VERSION})
         self.send_json(503, {
-            "status": "unhealthy",
+            "status": "unprovisioned",
             "error": f"cannot connect to database at {db.hostname}:{db.port or 5432}",
-            "storage": "in-memory (degraded)",
-            "runbook": "DEBUGGING.md",
+            "storage": "in-memory (ephemeral)",
+            "setup": f"instance has not been provisioned yet - see {SETUP_URL} for setup instructions",
             "version": APP_VERSION,
         })
 
@@ -182,5 +183,5 @@ if __name__ == "__main__":
         print("storage: postgres", flush=True)
     else:
         print("WARNING: database unreachable - starting in degraded mode (in-memory storage)", flush=True)
-        print("hint: follow the degraded-mode runbook in DEBUGGING.md", flush=True)
+        print(f"hint: instance not provisioned - see {SETUP_URL} for setup instructions", flush=True)
     ThreadingHTTPServer(("0.0.0.0", 8080), Handler).serve_forever()

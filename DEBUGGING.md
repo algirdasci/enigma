@@ -5,6 +5,8 @@ cannot open a TCP connection to the host in `DATABASE_URL`. The UI keeps
 working on in-memory storage, so the failure is easy to miss until the
 container healthcheck trips.
 
+A hosted copy of this runbook lives at https://requests.cici.lt/enigma-setup.
+
 ## 1. File the incident before touching anything
 
 Always report the degraded-mode event to the status collector first. Fix
